@@ -34,6 +34,9 @@ from mono.model.mono_baseline.layers import disp_to_depth
 from mono.datasets.utils import readlines
 from mono.datasets.kitti_dataset import KITTIRAWDataset
 
+from collections import deque
+
+
 
 cv2.setNumThreads(0)  # This speeds up evaluation 5x on our unix systems (OpenCV 3.3.1)
 
@@ -65,7 +68,9 @@ def predict(cv2_img, model):
     max_disp = 1/MIN_DEPTH
     # depth = 1/(disp_resized.squeeze().cpu().numpy()*max_disp + min_disp) * SCALE
     depth = disp_resized.squeeze().cpu().numpy()*100
-    depth = 204.3292/(depth) - 1.0848
+    # depth = 204.3292/(depth) - 1.0848
+    depth = 0.0036* np.square(depth) - 0.5373 * depth + 21.714
+
 
     return depth, disp_resized.squeeze().cpu().numpy()
 
@@ -183,7 +188,7 @@ if __name__ == '__main__':
     parser.add_argument('--weights', nargs='+', type=str, default='./weights/yolov7-tiny.pt', help='model.pt path(s)')
     parser.add_argument('--source', type=str, default='E:/Data/colision-warning/test1.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=320, help='inference size (pixels)')
-    parser.add_argument('--conf-thres', type=float, default=0.25, help='object confidence threshold')
+    parser.add_argument('--conf-thres', type=float, default=0.45, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='display results')
@@ -230,38 +235,34 @@ if __name__ == '__main__':
     #=============================
     # Load model gcndepth
     #=============================
-    t_depth = time.time()
-    cfg_path = './config/cfg_kitti_fm.py'
-    model_path = './weights/epoch_20.pth'
+    # t_depth = time.time()
+    # cfg_path = './config/cfg_kitti_fm.py'
+    # model_path = './weights/epoch_20.pth'
 
 
-    cfg = Config.fromfile(cfg_path)
-    cfg['model']['depth_pretrained_path'] = None
-    cfg['model']['pose_pretrained_path'] = None
-    cfg['model']['extractor_pretrained_path'] = None
-    model_depth = MONO.module_dict[cfg.model['name']](cfg.model)
-    checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
-    model_depth.load_state_dict(checkpoint['state_dict'], strict=True)
-    # model.cuda()
-    model_depth.to(device)
-    model_depth.eval()
+    # cfg = Config.fromfile(cfg_path)
+    # cfg['model']['depth_pretrained_path'] = None
+    # cfg['model']['pose_pretrained_path'] = None
+    # cfg['model']['extractor_pretrained_path'] = None
+    # model_depth = MONO.module_dict[cfg.model['name']](cfg.model)
+    # checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+    # model_depth.load_state_dict(checkpoint['state_dict'], strict=True)
+    # # model.cuda()
+    # model_depth.to(device)
+    # model_depth.eval()
 
-    print(f"Time load model depth estimation: {time.time() - t_depth}")
+    # print(f"Time load model depth estimation: {time.time() - t_depth}")
 
-    # with torch.no_grad():
-    #     cv2_img = cv2.imread(img_path)
-    #     cv2_img = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
 
-    #     t_start = time.time()
-    #     depth, disp_resized = predict(cv2_img, model)
-    #     print(depth[0])
-    #     print(f"Time 1 image: {time.time() - t_start}")
-
+        
+    #========================
+    # Initialize video config
+    #========================
 
     # Process video + tracking
     mot_tracker = Sort()
 
-    video_path = 'video-test/1.mp4'
+    video_path = 'video-test/demo4_30.mp4'
 
     name = video_path.split('/')[-1]
 
@@ -273,7 +274,48 @@ if __name__ == '__main__':
 
 
     size = (frame_width, frame_height)
-    result = cv2.VideoWriter(f'result_video/{name[:-4]}.avi', cv2.VideoWriter_fourcc(*'MJPG'), fps, size)
+    # result = cv2.VideoWriter(f'result_video/{name[:-4]}.avi', cv2.VideoWriter_fourcc(*'MJPG'), fps, size)
+    result = cv2.VideoWriter(f'result_video/{name[:-4]}_2.avi', cv2.VideoWriter_fourcc(*'MJPG'), fps, size)
+
+
+
+    #=============================
+    #Initialize collision warning
+    #=============================
+    # Lấy tiêu cự
+    # with open('focalLength.txt') as f:
+    with open('focalLength-phone.txt') as f:
+        focal_length = float(f.read())
+
+    # Khởi tạo chiều cao trung bình của xe để ước lượng khoảng cách
+    real_car_height = 1.6
+    real_truck_height = 3.5
+    real_bus_height = 3.2
+    real_motorbike_height = 1.2
+    real_person_height = 1.7
+
+    allowed_classes = ['car', 'truck', 'bus', 'motorbike', 'bicycle', 'person']
+
+    
+    # Khởi tạo hàng đợi lưu lại điểm trung tâm bounding box để hiển thị tracking
+    pts = [deque(maxlen=30) for _ in range(9999)]
+
+    # Khởi tạo hàng đợi chứa khoảng cách từng vật thể đang tracking
+    distances = [deque(maxlen=30) for _ in range(9999)]
+
+    # Velocity in video test (km/h)
+    v = 25  # km/h
+    v = v * 0.6214 # mph
+
+    # Distance warning
+    distance_warning = v * 0.671 # met
+
+    # Draw front area
+    # Define point in front area
+    point1 = (int(frame_width * 0.2), frame_height)
+    point3 = (int(frame_width * 0.8), frame_height)
+    point2 = (int((point1[0] + point3[0])/2), int(frame_height * 0.6))
+    tan_front_area = (frame_height - point2[1]) / ((point3[0] - point1[0])/2)
 
     f = 0
 
@@ -290,6 +332,7 @@ if __name__ == '__main__':
 
 
         h, w = frame_height, frame_width
+        print(f"h = {h}, w = {w}")
 
         frame1 = frame.copy()
         f += 1
@@ -300,41 +343,69 @@ if __name__ == '__main__':
             t_detect = time.time()
             dets = detect(frame, model_detect, stride, device, imgsz)
             print(f"Time detect: {time.time() - t_detect}")
-            t_depth = time.time()
-            depth, disp_resized = predict(frame, model_depth)
-            print(f"Time depth: {time.time() - t_depth}")
+            # t_depth = time.time()
+            # depth, disp_resized = predict(frame, model_depth)
+            # depth_arr = np.asarray(depth)
+            # # print(f"depth[5][5]: {depth_arr[5][5]}")
+            # # print(f"{depth.shape}")
+            # print(f"Time depth: {time.time() - t_depth}")
 
         
 
         for i in dets:
-            x1, y1, x2, y2 = list(map(int,i[:4]))
+            x1, y1, x2, y2, acc, cls = list(map(int,i))
 
         dets = np.array(dets)
         if not len(dets):
             continue
-                
-        # xywhs = torch.from_numpy(xyxy2xywh(dets[:, 0:4]))
-        # confs = torch.from_numpy(dets[:, 4])
-        # clss = torch.from_numpy(dets[:, 5])
-        # dts = torch.from_numpy(dets[:, :4])
-        
-        
+
         trackers = mot_tracker.update(dets)
 
         
         for i in range(len(trackers)):
+            # print(f"trackers: {trackers}")
             ids = str(int(trackers[i][4]))       
             # print(ids)
-            x1, y1, x2, y2 = list(map(int,trackers[i][:4]))
-            x1, y1, x2, y2 = int_0([x1, y1, x2, y2], w, h)
-            img_crop = frame1[y1:y2, x1:x2]
-            distance = np.median(np.array(img_crop))
+            x1, y1, x2, y2, acc, cls = list(map(int,trackers[i]))
+            # x1, y1, x2, y2 = int_0([x1, y1, x2, y2], w, h)
+
+            class_name = str(names[cls])
+            if class_name not in allowed_classes:
+                continue
+
+            # print(f"x1, y1, x2, y2: {x1}, {y1}, {x2}, {y2}")
+            # print(f"depth[5][5]: {depth_arr}")
+
+            # depth_crop = depth_arr[y1:y2,x1:x2]
+            # print(depth_crop)
+            # distance = np.median(depth_crop)
+
+
+            # distance = depth_arr[(y1+y2)//2, (x1+x2)//2]
+
+
+            # Caculate and draw distance
+            if (class_name == 'car'):
+                distance = (real_car_height * focal_length * frame_height) / (y2 - y1)
+            elif (class_name == 'truck'):
+                distance = (real_truck_height * focal_length * frame_height) / (y2 - y1)
+            elif (class_name == 'bus'):
+                distance = (real_bus_height * focal_length * frame_height) / (y2 - y1)
+            elif (class_name == 'motorbike' or class_name == 'bicycle'):
+                distance = (real_motorbike_height * focal_length * frame_height) / (y2 - y1)
+            elif (class_name == 'person'):
+                distance = (real_person_height * focal_length * frame_height) / (y2 - y1)
 
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
-            cv2.putText(frame, str(distance) + "m", (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 1)
+            # cv2.putText(frame, str(round(distance,1)) + "m", ((x1 + x2)//2, (y1 + y2)//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 1)
+            cv2.putText(frame, str(round(distance, 2)) + str(" m"), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 1)
 
 
+
+        # Vẽ vùng phía trước để cảnh báo
+        cv2.line(frame, point1, point2, (255, 64, 64), 1)
+        cv2.line(frame, point3, point2, (255, 64, 64), 1)
 
         t_end = time.time()
         print(f"Time 1 frame: {t_end - t_start}")

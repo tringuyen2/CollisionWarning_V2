@@ -48,7 +48,7 @@ def predict(cv2_img, model):
     max_disp = 1/MIN_DEPTH
     # depth = 1/(disp_resized.squeeze().cpu().numpy()*max_disp + min_disp) * SCALE
     depth = disp_resized.squeeze().cpu().numpy()*100
-    depth = 204.3292/(depth) - 1.0848
+    # depth = 204.3292/(depth) - 1.0848
 
     return depth, disp_resized.squeeze().cpu().numpy()
 
@@ -97,13 +97,13 @@ def evaluate(cfg_path, model_path, img_path, output_path, file_depth):
 
 
 if __name__ == "__main__":
-    file_depth = './assets/31.txt'
+    file_depth = './assets/test.txt'
     # cfg_path = '../config/cfg_kitti_fm.py'# path to cfg file
     cfg_path = './config/cfg_kitti_fm.py'
     # model_path = '/media/sconly/harddisk/weight/fm_depth.pth'# path to model weight
-    model_path = './epoch_20.pth'
-    img_path = './image-distance/31.png'
-    output_path = './image-distance/31-out.png' # dir for saving depth maps
+    model_path = './weights/epoch_20.pth'
+    img_path = './test.png'
+    output_path = './image-distance/test-out.png' # dir for saving depth maps
 
 
 
@@ -132,6 +132,11 @@ if __name__ == "__main__":
     t_start = time.time()
     depth, disp_resized = predict(cv2_img, model)
     print(depth[0])
+    f = open(file_depth, 'w')
+    for t in depth:
+        line = ' '.join(str(x) for x in t)
+        f.write(line + '\n')
+    f.close()
 
     print(f"Time 1 image: {time.time() - t_start}")
 
@@ -140,6 +145,35 @@ if __name__ == "__main__":
 
     print("\n-> Done!")
 
+    h, w, _ = cv2_img.shape
 
+    h1 = h//2
+    w1 = w//2
+
+    img = cv2.resize(cv2_img, (w1, h1))
+
+    def click_event(event, x, y, flags, params):
+
+        # checking for left mouse clicks
+        if event == cv2.EVENT_LBUTTONDOWN:
+            print(x, ' ', y)
+            
+            print(f"depth: {depth[y*2][x*2]}")
+
+            cv2.imshow('image', img)
+
+    
+    # displaying the image
+    cv2.imshow('image', img)
+
+    # setting mouse handler for the image
+    # and calling the click_event() function
+    cv2.setMouseCallback('image', click_event)
+
+    # wait for a key to be pressed to exit
+    cv2.waitKey(0)
+
+    # close the window
+    cv2.destroyAllWindows()
 
     # evaluate(cfg_path, model_path, img_path, output_path, file_depth)

@@ -41,7 +41,7 @@ class Sort:
 
 
         # we are taking only those trackers which is updated and predicted atleast self.hit_sum        
-        out = np.array([np.concatenate((trk.current_state, [trk.id]))
+        out = np.array([np.concatenate((trk.current_state, [trk.id], [trk.detclass]))
                 for trk in self.trackers
                 if trk.time_since_last_update == 0 and trk.no_of_updates >= self.hit_sum])
         

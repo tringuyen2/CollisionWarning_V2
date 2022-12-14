@@ -3,13 +3,14 @@ import numpy as np
 from . utils import bbox_to_kalman, kalman_to_bbox
 
 class  KalmanTracker():
-    def __init__(self,bbox,label):
+    def __init__(self, bbox, id):
 
         self.no_of_updates = 0
 
         self.time_since_last_update = 0
         self.kalman = cv2.KalmanFilter(dynamParams=7,measureParams=4,type=cv2.CV_64F)
-        self.id = label
+        self.id = id
+        self.detclass = bbox[5]
         # ux,uy,s,r,ux',uy',s'
         self.kalman.transitionMatrix = np.array([
             [1,0,0,0,1,0,0],
