@@ -185,23 +185,16 @@ def int_0(a, w, h):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', nargs='+', type=str, default='./weights/yolov7-tiny.pt', help='model.pt path(s)')
+    parser.add_argument('--weights_detect', nargs='+', type=str, default='./weights/yolov7-tiny.pt', help='model yolov7 path(s)')
+    parser.add_argument('--weights_depth', nargs='+', type=str, default='./weights/epoch_20.pth', help='model gcndepth path(s)')
     parser.add_argument('--source', type=str, default='E:/Data/colision-warning/test1.mp4', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--img-size', type=int, default=320, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.45, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='IOU threshold for NMS')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='display results')
-    parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
-    parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --class 0, or --class 0 2 3')
-    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
-    parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--update', action='store_true', help='update all models')
-    parser.add_argument('--project', default='runs/detect', help='save results to project/name')
-    parser.add_argument('--name', default='object_tracking', help='save results to project/name')
-    parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--no-trace', action='store_true', help='don`t trace model')
     opt = parser.parse_args()
     print(opt)
@@ -217,7 +210,7 @@ if __name__ == '__main__':
 
     # Load model
     imgsz = 320
-    model_detect = attempt_load(opt.weights, map_location=device)  # load FP32 model
+    model_detect = attempt_load(opt.weights_detect, map_location=device)  # load FP32 model
     stride = int(model_detect.stride.max())  # model stride
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
 
@@ -235,23 +228,23 @@ if __name__ == '__main__':
     #=============================
     # Load model gcndepth
     #=============================
-    # t_depth = time.time()
-    # cfg_path = './config/cfg_kitti_fm.py'
-    # model_path = './weights/epoch_20.pth'
+    t_depth = time.time()
+    cfg_path = './config/cfg_kitti_fm.py'
+    model_path = opt.weights_depth
 
 
-    # cfg = Config.fromfile(cfg_path)
-    # cfg['model']['depth_pretrained_path'] = None
-    # cfg['model']['pose_pretrained_path'] = None
-    # cfg['model']['extractor_pretrained_path'] = None
-    # model_depth = MONO.module_dict[cfg.model['name']](cfg.model)
-    # checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
-    # model_depth.load_state_dict(checkpoint['state_dict'], strict=True)
-    # # model.cuda()
-    # model_depth.to(device)
-    # model_depth.eval()
+    cfg = Config.fromfile(cfg_path)
+    cfg['model']['depth_pretrained_path'] = None
+    cfg['model']['pose_pretrained_path'] = None
+    cfg['model']['extractor_pretrained_path'] = None
+    model_depth = MONO.module_dict[cfg.model['name']](cfg.model)
+    checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+    model_depth.load_state_dict(checkpoint['state_dict'], strict=True)
+    # model.cuda()
+    model_depth.to(device)
+    model_depth.eval()
 
-    # print(f"Time load model depth estimation: {time.time() - t_depth}")
+    print(f"Time load model depth estimation: {time.time() - t_depth}")
 
 
         
@@ -325,7 +318,7 @@ if __name__ == '__main__':
         
         # Capture frame-by-frame
         ret, frame = cap.read()
-
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # cv2.imwrite("frame.jpg", frame)
@@ -343,13 +336,17 @@ if __name__ == '__main__':
             t_detect = time.time()
             dets = detect(frame, model_detect, stride, device, imgsz)
             print(f"Time detect: {time.time() - t_detect}")
-            # t_depth = time.time()
-            # depth, disp_resized = predict(frame, model_depth)
-            # depth_arr = np.asarray(depth)
-            # # print(f"depth[5][5]: {depth_arr[5][5]}")
-            # # print(f"{depth.shape}")
-            # print(f"Time depth: {time.time() - t_depth}")
+            t_depth = time.time()
+            depth, disp_resized = predict(frame, model_depth)
+            depth_arr = np.asarray(depth)
+            # print(f"depth[5][5]: {depth_arr[5][5]}")
+            # print(f"{depth.shape}")
+            print(f"Time depth: {time.time() - t_depth}")
 
+
+        # initialize color map
+        cmap = plt.get_cmap('tab20b')
+        colors = [cmap(i)[:3] for i in np.linspace(0, 1, 20)]
         
 
         for i in dets:
@@ -360,12 +357,9 @@ if __name__ == '__main__':
             continue
 
         trackers = mot_tracker.update(dets)
-
+        warn = 0
         
         for i in range(len(trackers)):
-            # print(f"trackers: {trackers}")
-            ids = str(int(trackers[i][4]))       
-            # print(ids)
             x1, y1, x2, y2, acc, cls = list(map(int,trackers[i]))
             # x1, y1, x2, y2 = int_0([x1, y1, x2, y2], w, h)
 
@@ -373,33 +367,139 @@ if __name__ == '__main__':
             if class_name not in allowed_classes:
                 continue
 
-            # print(f"x1, y1, x2, y2: {x1}, {y1}, {x2}, {y2}")
-            # print(f"depth[5][5]: {depth_arr}")
 
-            # depth_crop = depth_arr[y1:y2,x1:x2]
-            # print(depth_crop)
-            # distance = np.median(depth_crop)
+            ids = int(trackers[i][4])   
+            color = colors[ids % len(colors)]
+            color = [i * 255 for i in color] 
 
-
-            # distance = depth_arr[(y1+y2)//2, (x1+x2)//2]
-
+            # Draw motion path
+            center = ((x1 + x2)//2, (y1 + y2)//2)
+            pts[ids].append(center)
+            cv2.circle(frame,  (center), 1, color, 5)
+            for j in range(1, len(pts[ids])):
+                if pts[ids][j - 1] is None or pts[ids][j] is None:
+                    continue
+                thickness = int(np.sqrt(64 / float(j + 1)) * 2)
+                cv2.line(frame, (pts[ids][j-1]), (pts[ids][j]), (color), thickness)
+            
 
             # Caculate and draw distance
-            if (class_name == 'car'):
-                distance = (real_car_height * focal_length * frame_height) / (y2 - y1)
-            elif (class_name == 'truck'):
-                distance = (real_truck_height * focal_length * frame_height) / (y2 - y1)
-            elif (class_name == 'bus'):
-                distance = (real_bus_height * focal_length * frame_height) / (y2 - y1)
-            elif (class_name == 'motorbike' or class_name == 'bicycle'):
-                distance = (real_motorbike_height * focal_length * frame_height) / (y2 - y1)
-            elif (class_name == 'person'):
-                distance = (real_person_height * focal_length * frame_height) / (y2 - y1)
+            depth_crop = depth_arr[y1:y2,x1:x2]
+            # print(depth_crop)
+            distance = np.median(depth_crop)
+            # distance = depth_arr[(y1+y2)//2, (x1+x2)//2]
+
+            if distance > 10:
+                if (class_name == 'car'):
+                    distance = (real_car_height * focal_length * frame_height) / (y2 - y1)
+                elif (class_name == 'truck'):
+                    distance = (real_truck_height * focal_length * frame_height) / (y2 - y1)
+                elif (class_name == 'bus'):
+                    distance = (real_bus_height * focal_length * frame_height) / (y2 - y1)
+                elif (class_name == 'motorbike' or class_name == 'bicycle'):
+                    distance = (real_motorbike_height * focal_length * frame_height) / (y2 - y1)
+                elif (class_name == 'person'):
+                    distance = (real_person_height * focal_length * frame_height) / (y2 - y1)
 
 
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
+            a_point = center #Vị trí center bounding box thời điểm hiện tại
+            b_point = pts[ids][0]    # Vị trí center bounding box thời điểm 30 frame trước
+            # Check and draw orientaiton, = 1 if damage
+            if ((a_point[0] > b_point[0]) and (a_point[0] < point2[0])) or ((a_point[0] < b_point[0]) and (a_point[0] > (point1[0] + point3[0])/2)): # Trường hợp xe có hướng vào vùng phía trước xe tiếp tục xét góc đi vào, ngược lại (xe không có hướng đi vào vùng trước) thì an toàn
+                tan = (b_point[1] - a_point[1]) / (b_point[0] - a_point[0])
+                if tan < 0: tan = -tan
+                # cv2.putText(frame, str(round(tan, 2)), (int(
+                #         (bbox[0]+bbox[2])/2)-30, int((bbox[1]+bbox[3])/2)-30), 0, 0.75, (255, 255, 255), 2)
+                if (a_point[1] > b_point[1]): # Trường hợp xe đang xét xu hướng lùi lại và đi vào giữa
+                    if tan < 0.7:
+                        orientation = 1                     
+                    else:
+                        orientation = 0
+                        
+                else:               
+                    if tan < 0.2:   # Trường hợp xe đang xét xu hướng tiến lên và đi vào giữa
+                        orientation = 1
+                    else:
+                        orientation = 0
+            else:
+                orientation = 0
+
+            # 
+            x = 0
+            y = 0
+            tan_center=0
+            area_emergency = 0
+            # Kiểm tra xe có ở vùng nguy hiểm không, = 1 nếu trong vùng, = 2 nếu chỉ chạm, = 0 nếu không chạm
+            if (center[0] < point1[0]) or (center[0] > point3[0]) or (y2 < point2[1]):# Chia thành 4 vùng trái, giữa, phải, vùng trên trời nếu là trái hoặc phải hoặc trên trời thì ở vùng an toàn-> xét phần ở giữa
+                area_emergency = 0
+                x = 1
+            else: # Xét vùng ở giữa
+                # Tính góc vị trí của điểm trung tâm
+                if (center[0] < (point1[0] + point3[0])/2) and (center[0] > point1[0]): # Trường hợp bên trái vùng phía trước đang xét
+                    tan_center = (frame_height - center[1]) / (center[0] - point1[0]) if (center[0] - point1[0]) != 0 else (frame_height - center[1]) / 0.001
+                    x = 2.1
+                    # Kiểm tra điểm trung tâm có nằm trong vùng nguy hiểm không
+                    if tan_center < tan_front_area:
+                        area_emergency = 1 # Nằm trong vùng nguy hiểm
+                        y = 2
+                    else:
+                        # Nếu không thì kiểm tra bounding box có chạm vùng nguy hiểm không
+                        
+                        tan_box = (frame_height - y2) / (x2 - point1[0]) if x2 - point1[0] != 0 else (frame_height - y2) / 0.001
+                        x = 3.1
+                        
+                        if tan_box < tan_front_area:
+                            area_emergency = 2 #Chạm vùng nguy hiểm
+                            y = 3.1
+                        else:
+                            area_emergency = 0
+                            y = 3.2
+                elif (center[0] > (point1[0] + point3[0])/2) and (center[0] < point3[0]): # Trường hợp bên phải vùng phía trước đang xét
+                    tan_center = (frame_height - center[1]) / (point3[0] - center[0]) if point3[0] - center[0] != 0 else (frame_height - center[1]) / 0.001
+                    x = 2.2
+                    # Kiểm tra điểm trung tâm có nằm trong vùng nguy hiểm không
+                    if tan_center < tan_front_area:
+                        area_emergency = 1 # Nằm trong vùng nguy hiểm
+                        y = 2
+                
+                    else:
+                        # Nếu không thì kiểm tra bounding box có chạm vùng nguy hiểm không
+                       
+                        tan_box = (frame_height - y2) / (point3[0] - x1) if point3[0] - x1 != 0 else (frame_height - y2) / 0.001
+                        x = 3.2
+                        if tan_box < tan_front_area:
+                            area_emergency = 2
+                            y = 3.1
+                        else:
+                            area_emergency = 0
+                            y = 3.2
+            
+
+            # Vẽ mũi tên cho xe có hướng nguy hiểm
+            if distance < 10 and orientation == 1 and area_emergency != 1:
+                if center[0] < ((point1[0] + point3[0])/2):
+                    cv2.arrowedLine(frame, (int(x1), int(y1-10)), (int((x1+x2)/2), int(y1-10)), (255, 215, 0), 3)
+                else:
+                    cv2.arrowedLine(frame, (int(x2), int(y1-10)), (int((x1+x2)/2), int(y1-10)), (255, 215, 0), 3)
+
+
+            # draw bbox on screen
+            if ((area_emergency == 1) and (distance < 0.5*distance_warning)) or (distance < 0.5*distance_warning and orientation == 1): # Những trường hợp nguy cấp
+                color = (255, 0, 0)
+                warn = 1
+            elif (area_emergency == 2 and distance < 0.8 * distance_warning) or (distance < 0.2*distance_warning) or ((area_emergency == 1) and (distance < distance_warning)) or (distance < distance_warning and orientation == 1): # Những trường hợp cảnh báo
+                color = (255, 215, 0)
+                if warn == 0:
+                    warn = 2
+            else:   # Những trương hợp an toàn
+                color = (0, 0, 255)
+
+            # print(color)
+            # cv2.circle(frame,  (center), 1, color, 5)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             # cv2.putText(frame, str(round(distance,1)) + "m", ((x1 + x2)//2, (y1 + y2)//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 1)
-            cv2.putText(frame, str(round(distance, 2)) + str(" m"), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 1)
+            cv2.putText(frame, str(round(distance, 2)) + str(" m"), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 1)
+            # cv2.putText(frame, str(ids), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 1)
 
 
 
@@ -411,6 +511,14 @@ if __name__ == '__main__':
         print(f"Time 1 frame: {t_end - t_start}")
         fps = round(1/(t_end-t_start), 1)
 
+        if warn == 1:
+            cv2.putText(frame, "Emergency!!", (50, 100), 0, 1.5, (255, 0, 0), 3)
+        elif warn == 2:
+            cv2.putText(frame, "Warning!!", (50, 100), 0, 1.5, (255, 215, 0), 3)
+        else:
+            cv2.putText(frame, "Safe", (50, 100), 0, 1.5, (0, 0, 255), 3)
+
+
         print(f"fps: {fps}")
         print()
 
@@ -418,6 +526,7 @@ if __name__ == '__main__':
         cv2.putText(frame, str(fps) + " fps", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 1)
         
         # Display the resulting frame
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         cv2.imshow('Frame', frame)
         result.write(frame)
 
